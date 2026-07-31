@@ -247,7 +247,10 @@
             margin-bottom: 8px;
             box-shadow: 0 1px 4px rgba(0,0,0,0.04);
             border-left: 4px solid #2d3e50;
+            cursor: pointer;
+            transition: background 0.1s;
         }
+        .record-item:active { background: #f1f5f9; }
         .record-item.income { border-left-color: #2ecc71; }
         .record-item.expense { border-left-color: #ff6b6b; }
         .record-info { display: flex; flex-direction: column; }
@@ -428,6 +431,10 @@
             width: 1px;
             height: 1px;
         }
+
+        /* 编辑记录表单 */
+        .edit-form { padding-top: 4px; }
+        .edit-form .btn-add { font-size: 16px; padding: 14px; }
     </style>
 </head>
 <body>
@@ -440,10 +447,6 @@
             <div class="balance-number" id="totalBalance">¥0.00</div>
             <button class="menu-btn" id="menuToggle" onclick="toggleMenu()">⋮</button>
             <div class="menu-dropdown" id="menuDropdown">
-                <div class="menu-item" onclick="selectDateForNew()">
-                    <span>📅 记账日期</span>
-                    <span class="badge" id="menuDateBadge">今天</span>
-                </div>
                 <div class="menu-item" onclick="setFixedIncome()">
                     <span>💰 固定收入</span>
                     <span class="badge" id="menuFixedBadge">未设置</span>
@@ -523,7 +526,7 @@
             </div>
             <div class="about-icon">📒</div>
             <div class="about-title">我的记账本</div>
-            <div class="about-version">版本 v1.0</div>
+            <div class="about-version">版本 v1.1</div>
             <div class="about-desc">简洁、高效的日常收支管理工具，所有数据仅保存在本地，无需联网。</div>
             <ul class="about-features">
                 <li><span>⚡</span> 快速记录收支，支持金额逗号分隔</li>
@@ -533,6 +536,25 @@
                 <li><span>🔍</span> 日期范围筛选 + 金额/备注搜索</li>
                 <li><span>🎯</span> 极简界面，专注记账，无广告</li>
             </ul>
+        </div>
+    </div>
+
+    <!-- ===== 编辑记录模态框 ===== -->
+    <div class="modal-overlay" id="editOverlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2>✏️ 编辑记录</h2>
+                <button class="modal-close" onclick="closeEdit()">✕</button>
+            </div>
+            <div class="edit-form">
+                <div class="input-row">
+                    <input type="text" id="editDesc" placeholder="备注" autocomplete="off">
+                </div>
+                <div class="input-row">
+                    <input type="text" id="editAmount" placeholder="金额" autocomplete="off">
+                </div>
+                <button class="btn-add" onclick="saveEdit()">保存修改</button>
+            </div>
         </div>
     </div>
 
@@ -547,7 +569,6 @@
         const SETTINGS_KEY = 'my_account_settings';
 
         let currentType = 'expense';
-        let currentDateForNew = getToday();
         let fixedIncomeAmount = null;
 
         // 筛选状态
@@ -570,7 +591,7 @@
         }
 
         function getCurrentMonth() {
-            return currentDateForNew.substring(0, 7);
+            return getToday().substring(0, 7);
         }
 
         function formatTime(isoString) {
@@ -616,11 +637,6 @@
             } else {
                 badge.textContent = '未设置';
             }
-        }
-
-        function updateDateBadge() {
-            const badge = document.getElementById('menuDateBadge');
-            badge.textContent = currentDateForNew === getToday() ? '今天' : currentDateForNew;
         }
 
         function setType(type) {
@@ -671,10 +687,10 @@
             render();
         }
 
-        // 处理隐藏日期选择器的变化
+        // 处理隐藏日期选择器的变化（仅用于日期范围筛选）
         function handleHiddenDateChange(value) {
             if (!value) return;
-            const mode = window._pickerMode || 'newDate';
+            const mode = window._pickerMode;
             if (mode === 'rangeStart') {
                 filterRangeStart = value;
                 _rangeStep = 2;
@@ -688,7 +704,7 @@
                 }
             } else if (mode === 'rangeEnd') {
                 filterRangeEnd = value;
-                window._pickerMode = 'newDate';
+                window._pickerMode = null;
                 if (filterRangeStart && filterRangeEnd) {
                     if (filterRangeStart > filterRangeEnd) {
                         [filterRangeStart, filterRangeEnd] = [filterRangeEnd, filterRangeStart];
@@ -701,9 +717,6 @@
                     document.getElementById('filterBtn').textContent = '📅 全部';
                     render();
                 }
-            } else if (mode === 'newDate') {
-                currentDateForNew = value;
-                updateDateBadge();
             }
         }
 
@@ -746,7 +759,7 @@
                 desc: desc,
                 amount: amount,
                 type: currentType,
-                date: currentDateForNew,
+                date: getToday(),
                 createdAt: createdAt
             };
             const data = loadData();
@@ -772,6 +785,46 @@
             closeMenu();
         }
 
+        // ============================
+        // 编辑记录
+        // ============================
+        let editingId = null;
+
+        function openEdit(id) {
+            const data = loadData();
+            const item = data.find(r => r.id === id);
+            if (!item) return;
+            editingId = id;
+            document.getElementById('editDesc').value = item.desc || '';
+            document.getElementById('editAmount').value = item.amount;
+            document.getElementById('editOverlay').classList.add('show');
+        }
+
+        function closeEdit() {
+            document.getElementById('editOverlay').classList.remove('show');
+            editingId = null;
+        }
+
+        function saveEdit() {
+            if (!editingId) return;
+            const desc = document.getElementById('editDesc').value.trim() || '无备注';
+            const amountStr = document.getElementById('editAmount').value.trim().replace(/,/g, '');
+            const amount = parseFloat(amountStr);
+            if (isNaN(amount) || amount <= 0) {
+                alert('❌ 请输入有效的正数金额（支持逗号）');
+                document.getElementById('editAmount').focus();
+                return;
+            }
+            let data = loadData();
+            const item = data.find(r => r.id === editingId);
+            if (!item) { closeEdit(); return; }
+            item.desc = desc;
+            item.amount = amount;
+            saveData(data);
+            closeEdit();
+            render();
+        }
+
         function render() {
             const filtered = getFilteredData();
             const listDiv = document.getElementById('recordList');
@@ -793,14 +846,14 @@
                     const cls = isIncome ? 'income' : 'expense';
                     const timeStr = item.createdAt ? formatTime(item.createdAt) : (item.date + ' 00:00');
                     html += `
-                        <div class="record-item ${cls}">
+                        <div class="record-item ${cls}" onclick="openEdit('${item.id}')">
                             <div class="record-info">
                                 <span class="record-category">${item.desc || '未命名'}</span>
                                 <span class="record-time">${timeStr}</span>
                             </div>
                             <div style="display:flex;align-items:center;gap:6px;">
                                 <span class="record-amount ${cls}">${sign}¥${parseFloat(item.amount).toFixed(2)}</span>
-                                <button class="btn-delete" onclick="deleteRecord('${item.id}')">✕</button>
+                                <button class="btn-delete" onclick="event.stopPropagation(); deleteRecord('${item.id}')">✕</button>
                             </div>
                         </div>
                     `;
@@ -869,21 +922,6 @@
             saveSettings();
             updateFixedIncomeBadge();
             checkAndAddFixedIncome();
-            closeMenu();
-        }
-
-        // ============================
-        // 记账日期（菜单）
-        // ============================
-        function selectDateForNew() {
-            const input = document.getElementById('hiddenDateInput');
-            input.value = currentDateForNew;
-            window._pickerMode = 'newDate';
-            if (typeof input.showPicker === 'function') {
-                try { input.showPicker(); } catch (e) { input.click(); }
-            } else {
-                input.click();
-            }
             closeMenu();
         }
 
@@ -1125,8 +1163,6 @@
             loadSettings();
             updateFixedIncomeBadge();
             setType('expense');
-            currentDateForNew = getToday();
-            updateDateBadge();
 
             filterType = 'all';
             filterRangeStart = null;
@@ -1137,7 +1173,7 @@
             checkAndAddFixedIncome();
             backBtn.classList.remove('show');
 
-            console.log('📒 记账本 v1.0 已加载，数据条数：', loadData().length);
+            console.log('📒 记账本 v1.1 已加载，数据条数：', loadData().length);
         };
     </script>
 
