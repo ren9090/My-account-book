@@ -526,7 +526,7 @@
             </div>
             <div class="about-icon">📒</div>
             <div class="about-title">我的记账本</div>
-            <div class="about-version">版本 v1.1</div>
+            <div class="about-version">版本 v1.2</div>
             <div class="about-desc">简洁、高效的日常收支管理工具，所有数据仅保存在本地，无需联网。</div>
             <ul class="about-features">
                 <li><span>⚡</span> 快速记录收支，支持金额逗号分隔</li>
@@ -593,6 +593,21 @@
         function getCurrentMonth() {
             return getToday().substring(0, 7);
         }
+
+function parseSmartInput(str) {
+  const s = String(str).trim();
+  if (!s) return null;
+  if (/^[\d.]+$/.test(s.replace(/,/g, ''))) {
+    const a = parseFloat(s.replace(/,/g, ''));
+    return (isNaN(a) || a <= 0) ? null : { text: '', amount: a };
+  }
+  const m = s.match(/^(.*?)([\d,]+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const amount = parseFloat(m[2].replace(/,/g, ''));
+  if (isNaN(amount) || amount <= 0) return null;
+  const text = m[1].trim();
+  return text ? { text, amount } : null;
+}
 
         function formatTime(isoString) {
             if (!isoString) return '';
@@ -743,14 +758,31 @@
         function addRecord() {
             const descInput = document.getElementById('inputDesc');
             const amountInput = document.getElementById('inputAmount');
-            const desc = descInput.value.trim() || '无备注';
-            let amountStr = amountInput.value.trim().replace(/,/g, '');
+            let desc = descInput.value.trim();
+            const amountRaw = amountInput.value.trim();
+
+            const descParse = parseSmartInput(desc);
+            const amountParse = parseSmartInput(amountRaw);
+
+            if (desc !== '') {
+              if (descParse && descParse.text !== '') { desc = descParse.text; }
+              else if (descParse && descParse.text === '') { desc = ''; }
+            } else {
+              desc = (amountParse && amountParse.text) ? amountParse.text : '';
+            }
+            desc = desc || '无备注';
+
+            let smartAmount = null;
+            if (amountParse && amountParse.amount > 0) { smartAmount = amountParse.amount; }
+            else if (descParse && descParse.amount > 0) { smartAmount = descParse.amount; }
+
+            let amountStr = String(smartAmount !== null ? smartAmount : amountRaw).replace(/,/g, '');
             const amount = parseFloat(amountStr);
             if (isNaN(amount) || amount <= 0) {
-                alert('❌ 请输入有效的正数金额（支持逗号）');
-                amountInput.focus();
-                amountInput.value = '';
-                return;
+              alert('❌ 请输入有效的正数金额（支持逗号）');
+              amountInput.focus();
+              amountInput.value = '';
+              return;
             }
             const now = new Date();
             const createdAt = now.toISOString();
@@ -807,13 +839,32 @@
 
         function saveEdit() {
             if (!editingId) return;
-            const desc = document.getElementById('editDesc').value.trim() || '无备注';
-            const amountStr = document.getElementById('editAmount').value.trim().replace(/,/g, '');
+            const descInput = document.getElementById('editDesc');
+            const amountInput = document.getElementById('editAmount');
+            let desc = descInput.value.trim();
+            const amountRaw = amountInput.value.trim();
+
+            const descParse = parseSmartInput(desc);
+            const amountParse = parseSmartInput(amountRaw);
+
+            if (desc !== '') {
+              if (descParse && descParse.text !== '') { desc = descParse.text; }
+              else if (descParse && descParse.text === '') { desc = ''; }
+            } else {
+              desc = (amountParse && amountParse.text) ? amountParse.text : '';
+            }
+            desc = desc || '无备注';
+
+            let smartAmount = null;
+            if (amountParse && amountParse.amount > 0) { smartAmount = amountParse.amount; }
+            else if (descParse && descParse.amount > 0) { smartAmount = descParse.amount; }
+
+            let amountStr = String(smartAmount !== null ? smartAmount : amountRaw).replace(/,/g, '');
             const amount = parseFloat(amountStr);
             if (isNaN(amount) || amount <= 0) {
-                alert('❌ 请输入有效的正数金额（支持逗号）');
-                document.getElementById('editAmount').focus();
-                return;
+              alert('❌ 请输入有效的正数金额（支持逗号）');
+              document.getElementById('editAmount').focus();
+              return;
             }
             let data = loadData();
             const item = data.find(r => r.id === editingId);
@@ -1173,7 +1224,7 @@
             checkAndAddFixedIncome();
             backBtn.classList.remove('show');
 
-            console.log('📒 记账本 v1.1 已加载，数据条数：', loadData().length);
+            console.log('📒 记账本 v1.2 已加载，数据条数：', loadData().length);
         };
     </script>
 
