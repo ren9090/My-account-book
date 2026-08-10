@@ -1,4 +1,4 @@
-const CACHE_NAME = 'account-book-v3'
+const CACHE_NAME = 'account-book-v4'
 const ASSETS = [
   'index.html',
   'manifest.json',
@@ -23,18 +23,27 @@ self.addEventListener('activate', event => {
 })
 
 self.addEventListener('fetch', event => {
+  const { request } = event;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  // 导航请求：网络优先，离线时回退缓存首页
+  if (request.mode === 'navigate') {
+    event.respondWith(fetch(request).catch(() => caches.match('index.html')));
+    return;
+  }
+  // 仅接管白名单静态资源：缓存优先，miss 则网络并写缓存
+  if (!ASSETS.includes(url.pathname.split('/').pop())) return;
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) return cached
-      return fetch(event.request).then(response => {
-        const copy = response.clone()
-        if (response.type === 'basic' || response.type === 'cors') {
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy))
+    caches.match(request).then(cached => {
+      if (cached) return cached;
+      return fetch(request).then(response => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
         }
-        return response
-      }).catch(() => {
-        return caches.match('index.html')
-      })
+        return response;
+      }).catch(() => caches.match('index.html'));
     })
-  )
-})
+  );
+});
