@@ -558,6 +558,31 @@
         </div>
     </div>
 
+    <!-- 通用确认对话框 -->
+    <div class="modal-overlay" id="confirmOverlay">
+        <div class="modal-box">
+            <div class="modal-header"><h2>确认操作</h2><button class="modal-close" onclick="confirmNo()">✕</button></div>
+            <div style="font-size:15px;color:#1e293b;padding:4px 4px 16px;" id="confirmMessage"></div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn-add" style="flex:1;background:#f1f5f9;color:#475569;font-size:15px;padding:12px;" onclick="confirmNo()">取消</button>
+                <button class="btn-add" style="flex:1;font-size:15px;padding:12px;background:#e74c3c;" onclick="confirmYes()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 固定收入设置对话框 -->
+    <div class="modal-overlay" id="promptOverlay">
+        <div class="modal-box">
+            <div class="modal-header"><h2>💰 固定收入</h2><button class="modal-close" onclick="promptCancel()">✕</button></div>
+            <div style="font-size:14px;color:#475569;margin-bottom:10px;">每月自动入账金额（输入 0 关闭）</div>
+            <div class="input-row"><input type="text" id="promptInput" placeholder="如 8000" inputmode="decimal" onkeydown="if(event.key==='Enter')promptOk()"></div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn-add" style="flex:1;background:#f1f5f9;color:#475569;font-size:15px;padding:12px;" onclick="promptCancel()">取消</button>
+                <button class="btn-add" style="flex:1;font-size:15px;padding:12px;" onclick="promptOk()">确定</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 隐藏日期输入 -->
     <input type="date" class="hidden-input" id="hiddenDateInput" onchange="handleHiddenDateChange(this.value)">
 
@@ -811,18 +836,20 @@ function parseSmartInput(str) {
         }
 
         function deleteRecord(id) {
-            if (!confirm('确定删除这条记录吗？')) return;
-            let data = loadData();
-            data = data.filter(item => item.id !== id);
-            saveData(data);
-            render();
+            showConfirm('确定删除这条记录吗？', () => {
+                let data = loadData();
+                data = data.filter(item => item.id !== id);
+                saveData(data);
+                render();
+            });
         }
 
         function clearAll() {
-            if (!confirm('确定删除所有数据吗？不可撤销！')) return;
-            saveData([]);
-            render();
-            closeMenu();
+            showConfirm('确定删除所有数据吗？不可撤销！', () => {
+                saveData([]);
+                render();
+                closeMenu();
+            });
         }
 
         // ============================
@@ -843,6 +870,22 @@ function parseSmartInput(str) {
         function closeEdit() {
             document.getElementById('editOverlay').classList.remove('show');
             editingId = null;
+        }
+
+        let _confirmCallback = null;
+        function showConfirm(message, callback) {
+            _confirmCallback = callback;
+            document.getElementById('confirmMessage').textContent = message;
+            document.getElementById('confirmOverlay').classList.add('show');
+        }
+        function confirmYes() {
+            const cb = _confirmCallback; _confirmCallback = null;
+            document.getElementById('confirmOverlay').classList.remove('show');
+            if (cb) cb();
+        }
+        function confirmNo() {
+            _confirmCallback = null;
+            document.getElementById('confirmOverlay').classList.remove('show');
         }
 
         function saveEdit() {
@@ -966,24 +1009,29 @@ function parseSmartInput(str) {
             }
         }
 
-        function setFixedIncome() {
-            const current = fixedIncomeAmount || '';
-            const input = prompt('每月固定收入金额（输入0或取消关闭）：', current);
-            if (input === null) return;
-            const val = parseFloat(input);
+        function setFixedIncome() { showFixedIncomePrompt(); }
+
+        function showFixedIncomePrompt() {
+            document.getElementById('promptInput').value = fixedIncomeAmount || '';
+            document.getElementById('promptOverlay').classList.add('show');
+            setTimeout(() => document.getElementById('promptInput').focus(), 100);
+        }
+        function promptOk() {
+            const raw = document.getElementById('promptInput').value.trim();
+            const val = parseFloat(raw);
             if (isNaN(val) || val < 0) {
                 alert('请输入有效正数（或0关闭）');
                 return;
             }
-            if (val === 0) {
-                fixedIncomeAmount = null;
-            } else {
-                fixedIncomeAmount = val;
-            }
+            if (val === 0) { fixedIncomeAmount = null; } else { fixedIncomeAmount = val; }
+            document.getElementById('promptOverlay').classList.remove('show');
             saveSettings();
             updateFixedIncomeBadge();
             checkAndAddFixedIncome();
             closeMenu();
+        }
+        function promptCancel() {
+            document.getElementById('promptOverlay').classList.remove('show');
         }
 
         // ============================
@@ -1213,6 +1261,7 @@ function parseSmartInput(str) {
             overlay.addEventListener('click', function(e) {
                 if (e.target === this) {
                     this.classList.remove('show');
+                    if (this.id === 'confirmOverlay') _confirmCallback = null;
                 }
             });
         });
