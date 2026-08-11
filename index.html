@@ -950,14 +950,14 @@ function parseSmartInput(str) {
                     const cls = isIncome ? 'income' : 'expense';
                     const timeStr = item.createdAt ? formatTime(item.createdAt) : (item.date + ' 00:00');
                     html += `
-                        <div class="record-item ${cls}" onclick="openEdit('${escapeHtml(item.id)}')">
+                        <div class="record-item ${cls}" onclick="openEdit(${escapeHtml(JSON.stringify(item.id))})">
                             <div class="record-info">
                                 <span class="record-category">${escapeHtml(item.desc || '未命名')}</span>
                                 <span class="record-time">${escapeHtml(timeStr)}</span>
                             </div>
                             <div style="display:flex;align-items:center;gap:6px;">
                                 <span class="record-amount ${cls}">${sign}¥${amtText}</span>
-                                <button class="btn-delete" onclick="event.stopPropagation(); deleteRecord('${escapeHtml(item.id)}')">✕</button>
+                                <button class="btn-delete" onclick="event.stopPropagation(); deleteRecord(${escapeHtml(JSON.stringify(item.id))})">✕</button>
                             </div>
                         </div>
                     `;
