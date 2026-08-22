@@ -253,6 +253,7 @@
         .record-item:active { background: #f1f5f9; }
         .record-item.income { border-left-color: #2ecc71; }
         .record-item.expense { border-left-color: #ff6b6b; }
+        .record-item.readonly { cursor: default; }
         .record-info { display: flex; flex-direction: column; }
         .record-category { font-weight: 600; font-size: 15px; }
         .record-time { font-size: 11px; color: #94a3b8; margin-top: 2px; }
@@ -374,6 +375,7 @@
             width: 100%;
             height: 260px;
             display: block;
+            cursor: pointer;
         }
         .stats-empty {
             text-align: center;
@@ -517,6 +519,22 @@
         </div>
     </div>
 
+    <!-- ===== 统计明细弹窗 ===== -->
+    <div class="modal-overlay" id="statDetailOverlay">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2 id="statDetailTitle">支出明细</h2>
+                <button class="modal-close" onclick="closeStatDetail()">✕</button>
+            </div>
+            <div class="stats-tabs" id="statDetailSortTabs" style="margin-bottom:12px;">
+                <button class="stats-tab active" data-sort="amount" onclick="switchStatDetailSort('amount')">金额↓</button>
+                <button class="stats-tab" data-sort="time" onclick="switchStatDetailSort('time')">时间↓</button>
+            </div>
+            <div id="statDetailList"></div>
+            <div id="statDetailFooter" style="text-align:right;color:#64748b;font-size:13px;padding-top:10px;"></div>
+        </div>
+    </div>
+
     <!-- ===== 关于模态框 ===== -->
     <div class="modal-overlay" id="aboutOverlay">
         <div class="modal-box">
@@ -526,7 +544,7 @@
             </div>
             <div class="about-icon">📒</div>
             <div class="about-title">我的记账本</div>
-            <div class="about-version">版本 v1.3</div>
+            <div class="about-version">版本 v1.4</div>
             <div class="about-desc">简洁、高效的日常收支管理工具，所有数据仅保存在本地，无需联网。</div>
             <ul class="about-features">
                 <li><span>⚡</span> 快速记录收支，支持金额逗号分隔</li>
@@ -607,6 +625,14 @@
 
         // 日期范围选择过程
         let _rangeStep = 0;
+
+        // 图表命中缓存（由 drawChart 每次重绘时重建）
+        let _chartBars = [];
+        let _chartBounds = null;
+
+        // 统计明细弹窗状态
+        let statDetailBar = null;
+        let statDetailSort = 'amount';
 
         // ============================
         // 工具函数
@@ -1079,7 +1105,7 @@ function parseSmartInput(str) {
         function openStats() {
             document.getElementById('statsOverlay').classList.add('show');
             statsPeriod = 'week';
-            document.querySelectorAll('.stats-tab').forEach(tab => {
+            document.querySelectorAll('#statsOverlay .stats-tab').forEach(tab => {
                 tab.classList.toggle('active', tab.dataset.period === 'week');
             });
             renderStats();
@@ -1092,7 +1118,7 @@ function parseSmartInput(str) {
 
         function switchStatsPeriod(period) {
             statsPeriod = period;
-            document.querySelectorAll('.stats-tab').forEach(tab => {
+            document.querySelectorAll('#statsOverlay .stats-tab').forEach(tab => {
                 tab.classList.toggle('active', tab.dataset.period === period);
             });
             renderStats();
@@ -1104,6 +1130,8 @@ function parseSmartInput(str) {
             if (expenses.length === 0) {
                 document.getElementById('statsChart').style.display = 'none';
                 document.getElementById('statsEmpty').style.display = 'block';
+                _chartBars = [];
+                _chartBounds = null;
                 return;
             }
             document.getElementById('statsChart').style.display = 'block';
@@ -1111,34 +1139,46 @@ function parseSmartInput(str) {
 
             let groups = {};
             if (statsPeriod === 'week') {
+                const groupRecords = {};
                 expenses.forEach(item => {
                     const d = new Date(item.date + 'T00:00:00');
                     const week = getISOWeek(d);
                     const key = d.getFullYear() + '-W' + String(week).padStart(2, '0');
                     groups[key] = (groups[key] || 0) + item.amount;
+                    groupRecords[key] = groupRecords[key] || [];
+                    groupRecords[key].push(item);
                 });
                 const sortedKeys = Object.keys(groups).sort();
                 const labels = sortedKeys.map(k => k.replace('-W', 'W'));
                 const values = sortedKeys.map(k => groups[k]);
-                drawChart(labels, values, '周');
+                const barsData = sortedKeys.map((k, i) => ({ label: labels[i], value: values[i], records: groupRecords[k] || [] }));
+                drawChart(labels, values, '周', barsData);
             } else if (statsPeriod === 'month') {
+                const groupRecords = {};
                 expenses.forEach(item => {
                     const key = item.date.substring(0, 7);
                     groups[key] = (groups[key] || 0) + item.amount;
+                    groupRecords[key] = groupRecords[key] || [];
+                    groupRecords[key].push(item);
                 });
                 const sortedKeys = Object.keys(groups).sort();
                 const labels = sortedKeys.map(k => k.replace('-', '/'));
                 const values = sortedKeys.map(k => groups[k]);
-                drawChart(labels, values, '月');
+                const barsData = sortedKeys.map((k, i) => ({ label: labels[i], value: values[i], records: groupRecords[k] || [] }));
+                drawChart(labels, values, '月', barsData);
             } else if (statsPeriod === 'year') {
+                const groupRecords = {};
                 expenses.forEach(item => {
                     const key = item.date.substring(0, 4);
                     groups[key] = (groups[key] || 0) + item.amount;
+                    groupRecords[key] = groupRecords[key] || [];
+                    groupRecords[key].push(item);
                 });
                 const sortedKeys = Object.keys(groups).sort();
                 const labels = sortedKeys.map(k => k);
                 const values = sortedKeys.map(k => groups[k]);
-                drawChart(labels, values, '年');
+                const barsData = sortedKeys.map((k, i) => ({ label: labels[i], value: values[i], records: groupRecords[k] || [] }));
+                drawChart(labels, values, '年', barsData);
             }
         }
 
@@ -1150,7 +1190,8 @@ function parseSmartInput(str) {
             return 1 + Math.round(((date - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
         }
 
-        function drawChart(labels, values, unit) {
+        function drawChart(labels, values, unit, barsData) {
+            barsData = barsData || [];
             const canvas = document.getElementById('statsChart');
             const ctx = canvas.getContext('2d');
             const dpr = window.devicePixelRatio || 1;
@@ -1166,10 +1207,12 @@ function parseSmartInput(str) {
             const padding = { top: 20, bottom: 30, left: 10, right: 10 };
             const chartWidth = width - padding.left - padding.right;
             const chartHeight = height - padding.top - padding.bottom;
+            _chartBounds = { top: padding.top, bottom: padding.top + chartHeight, left: padding.left, right: width - padding.right };
 
             ctx.clearRect(0, 0, width, height);
+            _chartBars = [];
 
-            if (labels.length === 0) return;
+            if (labels.length === 0) { _chartBounds = null; return; }
 
             const maxVal = Math.max(...values, 0.01);
             const barWidth = Math.min(chartWidth / labels.length * 0.6, 60);
@@ -1234,7 +1277,91 @@ function parseSmartInput(str) {
                 ctx.font = '11px sans-serif';
                 ctx.textBaseline = 'top';
                 ctx.fillText(label, x + barWidth/2, padding.top + chartHeight + 4);
+
+                _chartBars.push({
+                    centerX: x + barWidth / 2,
+                    label: label,
+                    value: val,
+                    records: (barsData[idx] && barsData[idx].records) || []
+                });
             });
+        }
+
+        // 点击柱状图：命中最近柱并打开该时段明细
+        function handleStatsChartClick(e) {
+            if (_chartBars.length === 0 || !_chartBounds) return;
+            const x = e.offsetX;
+            const y = e.offsetY;
+            if (y < _chartBounds.top || y > _chartBounds.bottom) return;
+            if (x < _chartBounds.left || x > _chartBounds.right) return;
+            let best = null;
+            let bestDist = Infinity;
+            _chartBars.forEach(b => {
+                const d = Math.abs(b.centerX - x);
+                if (d < bestDist) { bestDist = d; best = b; }
+            });
+            if (!best) return;
+            openStatDetail(best);
+        }
+
+        function openStatDetail(bar) {
+            statDetailBar = bar;
+            document.getElementById('statDetailTitle').textContent = bar.label + ' · 支出明细';
+            renderStatDetailList();
+            document.getElementById('statDetailOverlay').classList.add('show');
+        }
+
+        function closeStatDetail() {
+            document.getElementById('statDetailOverlay').classList.remove('show');
+        }
+
+        // 渲染明细列表（只读；statDetailSort: 'amount' 金额降序 | 'time' 时间降序）
+        function renderStatDetailList() {
+            const listEl = document.getElementById('statDetailList');
+            const footerEl = document.getElementById('statDetailFooter');
+            if (!statDetailBar || statDetailBar.records.length === 0) {
+                listEl.innerHTML = '<div class="empty-tip">该时段暂无支出记录 ✨</div>';
+                footerEl.textContent = '';
+                return;
+            }
+            const records = [...statDetailBar.records];
+            records.sort((a, b) => {
+                if (statDetailSort === 'amount') {
+                    const diff = (Number(b.amount) || 0) - (Number(a.amount) || 0);
+                    if (diff !== 0) return diff;
+                }
+                const aTime = a.createdAt || a.date + 'T00:00:00';
+                const bTime = b.createdAt || b.date + 'T00:00:00';
+                return aTime < bTime ? 1 : -1;
+            });
+            let html = '';
+            let total = 0;
+            records.forEach(item => {
+                const amtNum = Number(item.amount);
+                const amtText = Number.isFinite(amtNum) ? amtNum.toFixed(2) : '0.00';
+                total += Number.isFinite(amtNum) ? amtNum : 0;
+                const timeStr = item.createdAt ? formatTime(item.createdAt) : (item.date + ' 00:00');
+                html += `
+                    <div class="record-item expense readonly">
+                        <div class="record-info">
+                            <span class="record-category">${escapeHtml(item.desc || '未命名')}</span>
+                            <span class="record-time">${escapeHtml(timeStr)}</span>
+                        </div>
+                        <span class="record-amount expense">-¥${amtText}</span>
+                    </div>
+                `;
+            });
+            listEl.innerHTML = html;
+            footerEl.textContent = '共 ' + records.length + ' 笔 · 合计 ¥' + total.toFixed(2);
+        }
+
+        // 切换明细排序（偏好跨打开保持）
+        function switchStatDetailSort(sort) {
+            statDetailSort = sort;
+            document.querySelectorAll('#statDetailSortTabs .stats-tab').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.sort === sort);
+            });
+            renderStatDetailList();
         }
 
         let statsResizeTimer;
@@ -1283,7 +1410,9 @@ function parseSmartInput(str) {
             checkAndAddFixedIncome();
             backBtn.classList.remove('show');
 
-            console.log('📒 记账本 v1.3 已加载，数据条数：', loadData().length);
+            document.getElementById('statsChart').addEventListener('click', handleStatsChartClick);
+
+            console.log('📒 记账本 v1.4 已加载，数据条数：', loadData().length);
         };
     </script>
 
