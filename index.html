@@ -409,6 +409,26 @@
             margin-bottom: 16px;
             padding: 0 8px;
         }
+        .about-update-btn {
+            display: block;
+            width: 100%;
+            padding: 11px;
+            border: none;
+            border-radius: 10px;
+            background: #2d3e50;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .about-update-btn:disabled { opacity: 0.6; cursor: wait; }
+        .about-update-status {
+            min-height: 20px;
+            margin-top: 8px;
+            text-align: center;
+            color: #64748b;
+            font-size: 13px;
+        }
         .about-features {
             list-style: none;
             padding: 0;
@@ -544,8 +564,10 @@
             </div>
             <div class="about-icon">📒</div>
             <div class="about-title">我的记账本</div>
-            <div class="about-version">版本 v1.61</div>
+            <div class="about-version">版本 v1.7</div>
             <div class="about-desc">简洁、高效的日常收支管理工具，所有数据仅保存在本地，无需联网。</div>
+            <button class="about-update-btn" id="checkUpdateBtn" onclick="checkForUpdate()">检查更新</button>
+            <div class="about-update-status" id="aboutUpdateStatus"></div>
             <ul class="about-features">
                 <li><span>⚡</span> 快速记录收支，支持金额逗号分隔</li>
                 <li><span>💾</span> 数据永久存储在浏览器中，不丢失</li>
@@ -623,6 +645,7 @@
         // 统计状态
         let statsPeriod = 'week';
         let _chartRenderArgs = null;
+        let _chartInitialPositioned = false;
 
         // 日期范围选择过程
         let _rangeStep = 0;
@@ -1126,6 +1149,7 @@
         }
 
         function renderStats() {
+            _chartInitialPositioned = false;
             const allData = loadData();
             const expenses = allData.filter(item => item.type === 'expense');
             if (expenses.length === 0) {
@@ -1314,11 +1338,14 @@
             });
 
             // 首次打开及切换统计维度时默认定位到最新数据。
-            if (mobileWeekChart && chartWrap.scrollLeft === 0 && labels.length > visibleBars) {
+            if (mobileWeekChart && !_chartInitialPositioned && labels.length > visibleBars) {
+                _chartInitialPositioned = true;
                 requestAnimationFrame(() => {
                     chartWrap.scrollLeft = chartWrap.scrollWidth;
                     drawChart(labels, values, unit, barsData);
                 });
+            } else if (mobileWeekChart) {
+                _chartInitialPositioned = true;
             }
         }
 
@@ -1434,6 +1461,38 @@
             document.getElementById('aboutOverlay').classList.remove('show');
         }
 
+        // 检查 Service Worker 是否有新版本，最多等待 1 秒。
+        function checkForUpdate() {
+            const button = document.getElementById('checkUpdateBtn');
+            const status = document.getElementById('aboutUpdateStatus');
+            button.disabled = true;
+            status.textContent = '正在检查更新…';
+            if (!('serviceWorker' in navigator)) {
+                status.textContent = '当前环境不支持自动更新';
+                button.disabled = false;
+                return;
+            }
+            navigator.serviceWorker.getRegistration().then(registration => {
+                if (!registration) throw new Error('未找到更新服务');
+                let updateFound = false;
+                registration.addEventListener('updatefound', () => {
+                    updateFound = true;
+                    status.textContent = '发现新版本，正在更新…';
+                    setTimeout(() => window.location.reload(), 200);
+                }, { once: true });
+                return Promise.race([
+                    registration.update(),
+                    new Promise(resolve => setTimeout(resolve, 1000))
+                ]).then(() => {
+                    if (!updateFound) status.textContent = '暂无更新';
+                    button.disabled = false;
+                });
+            }).catch(() => {
+                status.textContent = '检查更新失败';
+                button.disabled = false;
+            });
+        }
+
         // 点击模态框外部也可关闭（但保留点击内部不关闭）
         document.querySelectorAll('.modal-overlay').forEach(overlay => {
             overlay.addEventListener('click', function(e) {
@@ -1463,7 +1522,7 @@
 
             document.getElementById('statsChart').addEventListener('click', handleStatsChartClick);
 
-            console.log('📒 记账本 v1.61 已加载，数据条数：', loadData().length);
+            console.log('📒 记账本 v1.7 已加载，数据条数：', loadData().length);
         };
     </script>
 
