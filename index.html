@@ -544,7 +544,7 @@
             </div>
             <div class="about-icon">📒</div>
             <div class="about-title">我的记账本</div>
-            <div class="about-version">版本 v1.6</div>
+            <div class="about-version">版本 v1.61</div>
             <div class="about-desc">简洁、高效的日常收支管理工具，所有数据仅保存在本地，无需联网。</div>
             <ul class="about-features">
                 <li><span>⚡</span> 快速记录收支，支持金额逗号分隔</li>
@@ -622,6 +622,7 @@
 
         // 统计状态
         let statsPeriod = 'week';
+        let _chartRenderArgs = null;
 
         // 日期范围选择过程
         let _rangeStep = 0;
@@ -1149,9 +1150,16 @@
                     groupRecords[key].push(item);
                 });
                 const sortedKeys = Object.keys(groups).sort();
-                const labels = sortedKeys.map(k => k.replace('-W', 'W'));
+                const labels = sortedKeys.map(k => {
+                    const parts = k.split('-W');
+                    return parts[0] + '\n第' + parts[1] + '周';
+                });
                 const values = sortedKeys.map(k => groups[k]);
-                const barsData = sortedKeys.map((k, i) => ({ label: labels[i], value: values[i], records: groupRecords[k] || [] }));
+                const barsData = sortedKeys.map((k, i) => ({
+                    label: k.replace('-W', '年第') + '周',
+                    value: values[i],
+                    records: groupRecords[k] || []
+                }));
                 drawChart(labels, values, '周', barsData);
             } else if (statsPeriod === 'month') {
                 const groupRecords = {};
@@ -1221,7 +1229,16 @@
 
             if (labels.length === 0) { _chartBounds = null; return; }
 
-            const maxVal = Math.max(...values, 0.01);
+            _chartRenderArgs = { labels, values, unit, barsData };
+            const chartWrap = canvas.parentElement;
+            const slotWidth = width / Math.max(labels.length, 1);
+            const firstVisible = mobileWeekChart
+                ? Math.max(0, Math.floor(chartWrap.scrollLeft / slotWidth))
+                : 0;
+            const visibleValues = mobileWeekChart
+                ? values.slice(firstVisible, firstVisible + visibleBars)
+                : values;
+            const maxVal = Math.max(...visibleValues, 0.01);
             const barWidth = Math.min(chartWidth / labels.length * 0.6, 60);
             const gap = (chartWidth - barWidth * labels.length) / (labels.length + 1);
 
@@ -1283,15 +1300,26 @@
                 ctx.fillStyle = '#64748b';
                 ctx.font = '11px sans-serif';
                 ctx.textBaseline = 'top';
-                ctx.fillText(label, x + barWidth/2, padding.top + chartHeight + 4);
+                const labelLines = String(label).split('\n');
+                labelLines.forEach((line, lineIndex) => {
+                    ctx.fillText(line, x + barWidth/2, padding.top + chartHeight + 4 + lineIndex * 13);
+                });
 
                 _chartBars.push({
                     centerX: x + barWidth / 2,
-                    label: label,
+                    label: (barsData[idx] && barsData[idx].label) || label,
                     value: val,
                     records: (barsData[idx] && barsData[idx].records) || []
                 });
             });
+
+            // 首次打开及切换统计维度时默认定位到最新数据。
+            if (mobileWeekChart && chartWrap.scrollLeft === 0 && labels.length > visibleBars) {
+                requestAnimationFrame(() => {
+                    chartWrap.scrollLeft = chartWrap.scrollWidth;
+                    drawChart(labels, values, unit, barsData);
+                });
+            }
         }
 
         // 点击柱状图：命中最近柱并打开该时段明细
@@ -1372,6 +1400,22 @@
         }
 
         let statsResizeTimer;
+        let statsScrollFrame;
+        document.querySelector('.stats-chart-wrap').addEventListener('scroll', function() {
+            if (!_chartRenderArgs || statsPeriod !== 'week' || window.innerWidth > 600) return;
+            cancelAnimationFrame(statsScrollFrame);
+            statsScrollFrame = requestAnimationFrame(function() {
+                const wrap = document.querySelector('.stats-chart-wrap');
+                const scrollLeft = wrap.scrollLeft;
+                drawChart(
+                    _chartRenderArgs.labels,
+                    _chartRenderArgs.values,
+                    _chartRenderArgs.unit,
+                    _chartRenderArgs.barsData
+                );
+                wrap.scrollLeft = scrollLeft;
+            });
+        });
         window.addEventListener('resize', function() {
             if (document.getElementById('statsOverlay').classList.contains('show')) {
                 clearTimeout(statsResizeTimer);
@@ -1419,7 +1463,7 @@
 
             document.getElementById('statsChart').addEventListener('click', handleStatsChartClick);
 
-            console.log('📒 记账本 v1.6 已加载，数据条数：', loadData().length);
+            console.log('📒 记账本 v1.61 已加载，数据条数：', loadData().length);
         };
     </script>
 

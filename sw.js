@@ -1,4 +1,4 @@
-const CACHE_NAME = 'account-book-v7'
+const CACHE_NAME = 'account-book-v8'
 const ASSETS = [
   'index.html',
   'manifest.json',
