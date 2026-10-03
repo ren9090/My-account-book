@@ -38,6 +38,22 @@
         .balance-label { font-size: 13px; opacity: 0.7; }
         .balance-number { font-size: 34px; font-weight: bold; letter-spacing: 1px; }
         .balance-number.negative { color: #ff6b6b; }
+        .balance-stats-btn {
+            position: absolute;
+            right: 18px;
+            bottom: 18px;
+            width: 20%;
+            min-width: 88px;
+            padding: 8px 4px;
+            border: 1px solid rgba(255,255,255,0.28);
+            border-radius: 12px;
+            background: rgba(255,255,255,0.12);
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .balance-stats-btn:active { background: rgba(255,255,255,0.22); }
 
         .menu-btn {
             position: absolute;
@@ -467,14 +483,12 @@
         <div class="balance-box" id="balanceCard">
             <div class="balance-label">当前结余</div>
             <div class="balance-number" id="totalBalance">¥0.00</div>
+            <button class="balance-stats-btn" onclick="openStats()">📊 统计</button>
             <button class="menu-btn" id="menuToggle" onclick="toggleMenu()">⋮</button>
             <div class="menu-dropdown" id="menuDropdown">
                 <div class="menu-item" onclick="setFixedIncome()">
                     <span>💰 固定收入</span>
                     <span class="badge" id="menuFixedBadge">未设置</span>
-                </div>
-                <div class="menu-item" onclick="openStats()">
-                    <span>📊 支出统计</span>
                 </div>
                 <div class="menu-item" onclick="openAbout()">
                     <span>ℹ️ 关于</span>
