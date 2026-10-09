@@ -317,6 +317,29 @@
         }
         .back-to-top:active { transform: scale(0.9); background: #1a2634; }
 
+        /* 底部轻提示 toast（替代原生 alert 的非阻断提示） */
+        .toast {
+            position: fixed;
+            left: 50%;
+            bottom: 100px;
+            transform: translateX(-50%) translateY(10px);
+            background: rgba(26, 38, 52, 0.92);
+            color: white;
+            padding: 10px 18px;
+            border-radius: 20px;
+            font-size: 14px;
+            max-width: 80%;
+            text-align: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            z-index: 600;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
         /* ===== 统计与关于模态框共用 ===== */
         .modal-overlay {
             display: none;
@@ -534,6 +557,9 @@
     <!-- 回到顶部 -->
     <button class="back-to-top" id="backToTopBtn" onclick="scrollToTop()">↑</button>
 
+    <!-- 底部轻提示 -->
+    <div class="toast" id="toast"></div>
+
     <!-- ===== 统计模态框 ===== -->
     <div class="modal-overlay" id="statsOverlay">
         <div class="modal-box">
@@ -578,7 +604,7 @@
             </div>
             <div class="about-icon">📒</div>
             <div class="about-title">我的记账本</div>
-            <div class="about-version">版本 v1.7</div>
+            <div class="about-version">版本 v1.8</div>
             <div class="about-desc">简洁、高效的日常收支管理工具，所有数据仅保存在本地，无需联网。</div>
             <button class="about-update-btn" id="checkUpdateBtn" onclick="checkForUpdate()">检查更新</button>
             <div class="about-update-status" id="aboutUpdateStatus"></div>
@@ -645,6 +671,7 @@
         // 全局状态
         // ============================
         const STORAGE_KEY = 'my_account_data';
+        const BACKUP_KEY = 'my_account_data_backup';   // 上一次保存的快照，主数据损坏时自愈用
         const SETTINGS_KEY = 'my_account_settings';
 
         let currentType = 'expense';
@@ -700,6 +727,33 @@
             return text ? { text, amount } : null;
         }
 
+        // 解析备注/金额两个输入框（添加与编辑共用的逻辑，内部复用 parseSmartInput）。
+        // 返回 { desc, amount }；金额无效时返回 null，错误提示由调用方处理。
+        function parseRecordForm(descValue, amountValue) {
+            let desc = String(descValue || '').trim();
+            const amountRaw = String(amountValue || '').trim();
+
+            const descParse = parseSmartInput(desc);
+            const amountParse = parseSmartInput(amountRaw);
+
+            if (desc !== '') {
+                if (descParse && descParse.text !== '') { desc = descParse.text; }
+                else if (descParse && descParse.text === '') { desc = ''; }
+            } else {
+                desc = (amountParse && amountParse.text) ? amountParse.text : '';
+            }
+            desc = desc || '无备注';
+
+            let smartAmount = null;
+            if (amountParse && amountParse.amount > 0) { smartAmount = amountParse.amount; }
+            else if (descParse && descParse.amount > 0) { smartAmount = descParse.amount; }
+
+            const amountStr = String(smartAmount !== null ? smartAmount : amountRaw).replace(/,/g, '');
+            const amount = parseFloat(amountStr);
+            if (isNaN(amount) || amount <= 0) return null;
+            return { desc, amount };
+        }
+
         function formatTime(isoString) {
             if (!isoString) return '';
             try {
@@ -713,16 +767,64 @@
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
+        // 底部轻提示：非阻断，2 秒后自动消失（替代原生 alert）
+        let _toastTimer = null;
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            clearTimeout(_toastTimer);
+            _toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+
+        // 内存缓存：首次读取 localStorage，之后写操作同步更新，渲染不再反复 JSON.parse
+        let _dataCache = null;
+
         function loadData() {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw) {
-                try { return JSON.parse(raw); } catch (e) {}
+            if (_dataCache === null) {
+                let parsed = null;
+                const raw = localStorage.getItem(STORAGE_KEY);
+                if (raw) {
+                    try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
+                }
+                _dataCache = Array.isArray(parsed) ? parsed : [];
             }
-            return [];
+            return _dataCache;
         }
 
         function saveData(data) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            const prev = localStorage.getItem(STORAGE_KEY);
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            } catch (e) {
+                showToast('⚠️ 保存失败：浏览器存储空间不足或不可写');
+                return;
+            }
+            // 双写备份：把写入前的旧内容转存为快照，供启动自愈
+            if (prev !== null) {
+                try { localStorage.setItem(BACKUP_KEY, prev); } catch (e) {}
+            }
+            _dataCache = data;
+        }
+
+        // 启动自愈：主数据存在但损坏（解析失败/非数组）时，从备份恢复上一次保存的内容。
+        // 主键不存在视为全新用户；主键为空数组是合法状态，均不触发。
+        function ensureDataIntegrity() {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (raw === null) return;
+            try {
+                if (Array.isArray(JSON.parse(raw))) return;
+            } catch (e) {}
+            const backupRaw = localStorage.getItem(BACKUP_KEY);
+            if (!backupRaw) return;
+            try {
+                const backupData = JSON.parse(backupRaw);
+                if (Array.isArray(backupData) && backupData.length > 0) {
+                    saveData(backupData);
+                    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(backupData)); } catch (e) {}
+                    setTimeout(() => showToast('🛟 检测到数据异常，已自动恢复上次备份（' + backupData.length + ' 条）'), 600);
+                }
+            } catch (e) {}
         }
 
         function loadSettings() {
@@ -855,41 +957,20 @@
         function addRecord() {
             const descInput = document.getElementById('inputDesc');
             const amountInput = document.getElementById('inputAmount');
-            let desc = descInput.value.trim();
-            const amountRaw = amountInput.value.trim();
-
-            const descParse = parseSmartInput(desc);
-            const amountParse = parseSmartInput(amountRaw);
-
-            if (desc !== '') {
-              if (descParse && descParse.text !== '') { desc = descParse.text; }
-              else if (descParse && descParse.text === '') { desc = ''; }
-            } else {
-              desc = (amountParse && amountParse.text) ? amountParse.text : '';
+            const parsed = parseRecordForm(descInput.value, amountInput.value);
+            if (!parsed) {
+                showToast('请输入有效的正数金额（支持逗号）');
+                amountInput.focus();
+                amountInput.value = '';
+                return;
             }
-            desc = desc || '无备注';
-
-            let smartAmount = null;
-            if (amountParse && amountParse.amount > 0) { smartAmount = amountParse.amount; }
-            else if (descParse && descParse.amount > 0) { smartAmount = descParse.amount; }
-
-            let amountStr = String(smartAmount !== null ? smartAmount : amountRaw).replace(/,/g, '');
-            const amount = parseFloat(amountStr);
-            if (isNaN(amount) || amount <= 0) {
-              alert('❌ 请输入有效的正数金额（支持逗号）');
-              amountInput.focus();
-              amountInput.value = '';
-              return;
-            }
-            const now = new Date();
-            const createdAt = now.toISOString();
             const newRecord = {
                 id: Date.now() + '_' + Math.random().toString(36).substr(2, 6),
-                desc: desc,
-                amount: amount,
+                desc: parsed.desc,
+                amount: parsed.amount,
                 type: currentType,
                 date: getToday(),
-                createdAt: createdAt
+                createdAt: new Date().toISOString()
             };
             const data = loadData();
             data.push(newRecord);
@@ -954,38 +1035,20 @@
 
         function saveEdit() {
             if (!editingId) return;
-            const descInput = document.getElementById('editDesc');
-            const amountInput = document.getElementById('editAmount');
-            let desc = descInput.value.trim();
-            const amountRaw = amountInput.value.trim();
-
-            const descParse = parseSmartInput(desc);
-            const amountParse = parseSmartInput(amountRaw);
-
-            if (desc !== '') {
-              if (descParse && descParse.text !== '') { desc = descParse.text; }
-              else if (descParse && descParse.text === '') { desc = ''; }
-            } else {
-              desc = (amountParse && amountParse.text) ? amountParse.text : '';
+            const parsed = parseRecordForm(
+                document.getElementById('editDesc').value,
+                document.getElementById('editAmount').value
+            );
+            if (!parsed) {
+                showToast('请输入有效的正数金额（支持逗号）');
+                document.getElementById('editAmount').focus();
+                return;
             }
-            desc = desc || '无备注';
-
-            let smartAmount = null;
-            if (amountParse && amountParse.amount > 0) { smartAmount = amountParse.amount; }
-            else if (descParse && descParse.amount > 0) { smartAmount = descParse.amount; }
-
-            let amountStr = String(smartAmount !== null ? smartAmount : amountRaw).replace(/,/g, '');
-            const amount = parseFloat(amountStr);
-            if (isNaN(amount) || amount <= 0) {
-              alert('❌ 请输入有效的正数金额（支持逗号）');
-              document.getElementById('editAmount').focus();
-              return;
-            }
-            let data = loadData();
+            const data = loadData();
             const item = data.find(r => r.id === editingId);
             if (!item) { closeEdit(); return; }
-            item.desc = desc;
-            item.amount = amount;
+            item.desc = parsed.desc;
+            item.amount = parsed.amount;
             saveData(data);
             closeEdit();
             render();
@@ -1047,12 +1110,25 @@
         // ============================
         // 固定收入
         // ============================
+        // 旧数据一次性迁移：给按备注识别的旧固定收入记录补 fixed 标记
+        function migrateFixedIncomeFlags() {
+            const data = loadData();
+            let changed = false;
+            data.forEach(item => {
+                if (item.fixed !== true && item.desc === '固定收入' && item.type === 'income') {
+                    item.fixed = true;
+                    changed = true;
+                }
+            });
+            if (changed) saveData(data);
+        }
+
         function checkAndAddFixedIncome() {
             if (!fixedIncomeAmount || fixedIncomeAmount <= 0) return;
             const data = loadData();
             const month = getCurrentMonth();
             const hasFixed = data.some(item =>
-                item.desc === '固定收入' &&
+                item.fixed === true &&
                 item.type === 'income' &&
                 item.date && item.date.startsWith(month)
             );
@@ -1064,6 +1140,7 @@
                     desc: '固定收入',
                     amount: fixedIncomeAmount,
                     type: 'income',
+                    fixed: true,
                     date: getToday(),
                     createdAt: createdAt
                 };
@@ -1084,7 +1161,7 @@
             const raw = document.getElementById('promptInput').value.trim();
             const val = parseFloat(raw);
             if (isNaN(val) || val < 0) {
-                alert('请输入有效正数（或0关闭）');
+                showToast('请输入有效正数（或 0 关闭）');
                 return;
             }
             if (val === 0) { fixedIncomeAmount = null; } else { fixedIncomeAmount = val; }
@@ -1522,6 +1599,8 @@
         // ============================
         window.onload = function() {
             loadSettings();
+            ensureDataIntegrity();
+            migrateFixedIncomeFlags();
             updateFixedIncomeBadge();
             setType('expense');
 
@@ -1536,7 +1615,7 @@
 
             document.getElementById('statsChart').addEventListener('click', handleStatsChartClick);
 
-            console.log('📒 记账本 v1.7 已加载，数据条数：', loadData().length);
+            console.log('📒 记账本 v1.8 已加载，数据条数：', loadData().length);
         };
     </script>
 
